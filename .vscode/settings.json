@@ -1,0 +1,8 @@
+{
+    "python.defaultInterpreterPath": "C:/Users/akash/OneDrive/Documents/MyChatBotProject/fightmind/fightmind-model/.venv/Scripts/python.exe",
+    "python.analysis.extraPaths": [
+        "C:/Users/akash/OneDrive/Documents/MyChatBotProject/fightmind/fightmind-model/src"
+    ],
+    "python.analysis.venvPath": "C:/Users/akash/OneDrive/Documents/MyChatBotProject/fightmind/fightmind-model",
+    "python.analysis.venv": ".venv"
+}

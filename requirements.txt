@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────
+# FightMind AI — Python Model Service
+# requirements.txt
+# ─────────────────────────────────────────
+
+# ── API Server ────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20       # for file uploads
+httpx==0.28.1                  # async HTTP client (for calling external APIs)
+python-dotenv==1.0.1
+
+# ── Google Gemini ─────────────────────────
+google-generativeai==0.8.3
+
+# ── RAG / Embeddings ──────────────────────
+chromadb>=0.6.3
+sentence-transformers==3.3.1
+
+# ── Data Collection ───────────────────────
+wikipedia==1.4.0
+beautifulsoup4==4.12.3
+requests==2.32.3
+youtube-transcript-api==1.2.4
+datasets==3.2.0                # HuggingFace datasets
+
+# ── Data Processing ───────────────────────
+pandas>=2.2.3
+numpy>=1.26.4
+tqdm==4.67.1
+tiktoken==0.8.0                # token counting for chunking
+
+# ── Testing ───────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# ── Linting (CI) ──────────────────────────
+flake8==7.1.1

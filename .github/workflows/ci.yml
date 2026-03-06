@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────
+# FightMind AI — Python Model Service
+# GitHub Actions CI Pipeline
+# ─────────────────────────────────────────
+# Runs on every push and pull request.
+# Tests must pass before any merge to main.
+
+name: CI — Python AI Service
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    name: Lint + Test
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Python
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Run flake8 linting
+      - name: Lint with flake8
+        run: |
+          flake8 src/ tests/ --max-line-length=120 --ignore=E501,W503
+
+      # 5. Run pytest with dummy env vars
+      - name: Run tests with pytest
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SPORTS_DB_API_KEY: "1"
+          API_SPORTS_KEY: "dummy"
+          ENV: test
+          LOG_LEVEL: WARNING
+        run: |
+          pytest tests/ -v --tb=short
