@@ -1,0 +1,130 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FightMind AI — Logging Configuration
+# File: logging.yaml
+#
+# PURPOSE:
+#   Control exactly what log level every module/class prints.
+#   Edit this file to turn verbosity up or down without touching any code.
+#
+# HOW IT WORKS:
+#   Python reads this file at startup via logging_config.py.
+#   Each key under `loggers:` maps a module path to its minimum log level.
+#
+# LOG LEVELS (lowest → highest verbosity):
+#   DEBUG    — detailed step-by-step tracing (dev only)
+#   INFO     — normal operations: requests, completions, counts
+#   WARNING  — something unexpected but recoverable (skipped topic, retry)
+#   ERROR    — a task failed but the service keeps running
+#   CRITICAL — a fatal failure (can't write file, can't start)
+#
+# QUICK GUIDE:
+#   - Set a module to DEBUG during active development of that module
+#   - Set it back to INFO (or WARNING) when done
+#   - In production all modules default to their `production_level`
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Root / Global Defaults ────────────────────────────────────────────────────
+root:
+  development_level: INFO       # default for any logger not listed below
+  production_level:  INFO       # same in prod — avoid DEBUG in production
+
+# ── Module-Level Overrides ────────────────────────────────────────────────────
+# Format:  "module.path": { development_level: LEVEL, production_level: LEVEL }
+# Use the Python dotted module path (same as what you'd use in `import`)
+
+loggers:
+
+  # ── API Layer ───────────────────────────────────────────────────────────────
+  src.api.main:
+    development_level: INFO         # request/response logs
+    production_level:  INFO
+
+  # ── Pipeline Levels (set to DEBUG during active development of each level) ──
+  src.pipeline.level1_intent:
+    development_level: DEBUG        # verbose during development
+    production_level:  INFO
+
+  src.pipeline.level2_vision:
+    development_level: DEBUG
+    production_level:  INFO
+
+  src.pipeline.level3_rag:
+    development_level: DEBUG
+    production_level:  INFO
+
+  src.pipeline.level4_events:
+    development_level: DEBUG
+    production_level:  INFO
+
+  src.pipeline.level5_llm:
+    development_level: DEBUG
+    production_level:  INFO
+
+  src.pipeline.level6_validate:
+    development_level: DEBUG
+    production_level:  INFO
+
+  src.pipeline.pipeline_runner:
+    development_level: INFO
+    production_level:  INFO
+
+  # ── Data Collection ─────────────────────────────────────────────────────────
+  src.data_collection.scraper:
+    development_level: INFO         # change to DEBUG to see every article fetched
+    production_level:  WARNING      # only problems in prod (scraper runs offline)
+
+  src.data_collection.sports_api:
+    development_level: INFO         # live API calls — log every fetch attempt
+    production_level:  INFO         # keep INFO in prod: API calls are important to track
+
+  # ── Training ────────────────────────────────────────────────────────────────
+  src.training.preprocess:
+    development_level: INFO         # change to DEBUG to trace every chunk
+    production_level:  WARNING      # preprocessing is offline, only log problems
+
+  src.training.fine_tune:
+    development_level: DEBUG
+    production_level:  INFO
+
+  src.training.evaluate:
+    development_level: INFO
+    production_level:  INFO
+
+  # ── Core Utilities ──────────────────────────────────────────────────────────
+  src.core.logging_config:
+    development_level: INFO
+    production_level:  WARNING
+
+  # ── Startup ─────────────────────────────────────────────────────────────────
+  fightmind.startup:
+    development_level: INFO
+    production_level:  INFO
+
+  # ── Noisy Third-Party Libraries (always suppress) ───────────────────────────
+  httpx:
+    development_level: WARNING
+    production_level:  WARNING
+
+  httpcore:
+    development_level: WARNING
+    production_level:  WARNING
+
+  urllib3:
+    development_level: WARNING
+    production_level:  WARNING
+
+  chromadb:
+    development_level: WARNING
+    production_level:  WARNING
+
+  sentence_transformers:
+    development_level: WARNING
+    production_level:  WARNING
+
+  transformers:
+    development_level: WARNING
+    production_level:  WARNING
+
+  uvicorn.access:
+    development_level: WARNING      # FastAPI access logs are noisy — use middleware instead
+    production_level:  WARNING

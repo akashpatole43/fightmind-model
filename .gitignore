@@ -205,3 +205,20 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FightMind AI — Project-specific
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Large generated data files — run scraper/preprocess locally to regenerate
+data/raw/
+data/processed/
+
+# Trained model weights — download from Colab/HuggingFace after fine-tuning
+models/fine_tuned/
+
+# ChromaDB vector store — rebuilt from chunks.json in Step 1.8
+embeddings/vectorstore/
+
+# Local env file
+.env

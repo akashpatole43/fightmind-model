@@ -9,23 +9,26 @@ uvicorn[standard]==0.32.1
 python-multipart==0.0.20       # for file uploads
 httpx==0.28.1                  # async HTTP client (for calling external APIs)
 python-dotenv==1.0.1
+pyyaml==6.0.2                  # load logging.yaml config
 
 # ── Google Gemini ─────────────────────────
 google-generativeai==0.8.3
 
 # ── RAG / Embeddings ──────────────────────
 chromadb>=0.6.3
-sentence-transformers==3.3.1
+sentence-transformers==3.4.1
+accelerate>=0.26.0             # required by sentence-transformers Trainer (model.fit)
+hf_xet                         # optional: faster HuggingFace model downloads (avoids HTTP fallback warning)
 
 # ── Data Collection ───────────────────────
 wikipedia==1.4.0
-beautifulsoup4==4.12.3
-requests==2.32.3
-youtube-transcript-api==1.2.4
+beautifulsoup4>=4.12.3         # Colab needs >=4.13.0, so use >= not ==
+requests>=2.32.3               # Colab requires >=2.32.4, >= avoids conflict
+youtube-transcript-api==0.6.3
 datasets==3.2.0                # HuggingFace datasets
 
 # ── Data Processing ───────────────────────
-pandas>=2.2.3
+pandas>=2.2.2                  # Colab has 2.2.2 pre-installed; >= avoids conflict
 numpy>=1.26.4
 tqdm==4.67.1
 tiktoken==0.8.0                # token counting for chunking
