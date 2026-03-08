@@ -79,12 +79,17 @@ My Drive/
 ### 6. Copy chunks.json to the repo
 ```python
 import shutil, os
+
+# MUST set working directory first — otherwise chunks.json lands in /content/
+# instead of /content/fightmind-model/ where fine_tune.py looks for it
+os.chdir('/content/fightmind-model')
 os.makedirs("data/processed", exist_ok=True)
 
 shutil.copy("/content/drive/MyDrive/fightmind_fine_tuned_model/chunks.json",
             "data/processed/chunks.json")
 
-print(f"chunks.json ready ✅  size={(os.path.getsize('data/processed/chunks.json')/1024/1024):.1f} MB")
+print(f"chunks.json ready ✅  {os.path.getsize('data/processed/chunks.json')/1024/1024:.1f} MB")
+print(f"Saved at: {os.path.abspath('data/processed/chunks.json')}")
 ```
 
 ### 7. Run fine-tuning
@@ -170,10 +175,17 @@ drive.mount('/content/drive')
 **Cell 2 — Copy chunks.json**
 ```python
 import shutil, os
+
+# MUST set working directory first — otherwise chunks.json lands in /content/
+# instead of /content/fightmind-model/ where fine_tune.py looks for it
+os.chdir('/content/fightmind-model')
 os.makedirs("data/processed", exist_ok=True)
+
 shutil.copy("/content/drive/MyDrive/fightmind_fine_tuned_model/chunks.json",
             "data/processed/chunks.json")
+
 print(f"chunks.json ready ✅  {os.path.getsize('data/processed/chunks.json')/1024/1024:.1f} MB")
+print(f"Saved at: {os.path.abspath('data/processed/chunks.json')}")
 ```
 
 **Cell 3 — Fine-tune**
