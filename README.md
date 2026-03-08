@@ -31,8 +31,8 @@
 | 1.4 | `scraper.py` — Wikipedia + rules + YouTube | ✅ |
 | 1.5 | `sports_api.py` — live events (3-source fallback) | ✅ |
 | 1.6 | `preprocess.py` — clean + chunk raw data | ✅ |
-| 1.7 | `fine_tune.py` — fine-tune embedding model (Colab) | 🔄 |
-| 1.8 | `vector_store.py` — ChromaDB ingestion | ⬜ |
+| 1.7 | `fine_tune.py` — fine-tune embedding model (Colab) | ✅ |
+| 1.8 | `vector_store.py` — ChromaDB ingestion | 🔄 |
 | 1.9 | RAG retrieval accuracy tests | ⬜ |
 | 1.10–1.16 | 6-level pipeline (L1 intent → L6 validate) | ⬜ |
 | 1.17–1.19 | FastAPI endpoints + health check | ⬜ |

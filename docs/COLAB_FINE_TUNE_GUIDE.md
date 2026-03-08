@@ -30,8 +30,7 @@ python -m src.data_collection.scraper
 # Step 2 — preprocess into chunks
 python -m src.training.preprocess
 
-# Verify chunks were created
-# Expected: data/processed/chunks.json (~10–30 MB)
+# Verify chunks were created — expected: data/processed/chunks.json (~10–30 MB)
 ```
 
 ---
@@ -44,7 +43,7 @@ Go to [colab.research.google.com](https://colab.research.google.com) and create 
 ### 2. Select T4 GPU Runtime
 **Runtime → Change runtime type → T4 GPU → Save**
 
-### 3. Mount Google Drive (to save the model)
+### 3. Mount Google Drive
 ```python
 from google.colab import drive
 drive.mount('/content/drive')
@@ -56,57 +55,48 @@ drive.mount('/content/drive')
 ```
 My Drive/
 └── fightmind_fine_tuned_model/    ← create this folder
-    └── chunks.json                ← upload your chunks.json here
+    └── chunks.json                ← upload your local data/processed/chunks.json here
 ```
 
-Steps:
 1. Go to [drive.google.com](https://drive.google.com)
 2. Create folder **`fightmind_fine_tuned_model`** in My Drive
-3. Open that folder and upload `fightmind-model/data/processed/chunks.json` from your local machine
+3. Upload `fightmind-model/data/processed/chunks.json` into that folder
 
-> The model output will be saved to `fightmind_fine_tuned_model/model_output/` (a subfolder), keeping input and output separate.
+> ℹ️ The model will be saved to `fightmind_fine_tuned_model/model_output/` — separate from chunks.json.
 
-### 5. Install dependencies
+### 5. Clone repo and install fine-tuning packages
 ```python
-# accelerate is required by sentence-transformers Trainer (model.fit)
-!pip install sentence-transformers==3.4.1 "accelerate>=0.26.0" hf_xet --quiet
-```
-
-### 6. Clone your repo and install only fine-tuning dependencies
-```python
-# Clone the repo
+# Clone the repo — provides the src/ package used in Step 7
 !git clone https://github.com/YOUR_USERNAME/fightmind-model.git
-%cd fightmind-model
 
 # ⚠️  DO NOT run: pip install -r requirements.txt
-# Colab pre-installs pandas, requests, fastapi etc. at specific versions.
-# Installing the full requirements.txt overwrites them and causes conflicts.
-# Instead, install only the packages that fine_tune.py actually needs:
+# Colab pre-installs pandas, requests, fastapi etc. at fixed versions.
+# Installing the full requirements.txt conflicts with Colab's environment.
+# Only install what fine_tune.py needs:
 !pip install sentence-transformers==3.4.1 "accelerate>=0.26.0" pyyaml hf_xet --quiet
 ```
 
-### 7. Copy chunks.json to expected location
+### 6. Copy chunks.json to the repo
 ```python
 import shutil, os
 os.makedirs("data/processed", exist_ok=True)
 
-# chunks.json is in fightmind_fine_tuned_model/ on Drive
 shutil.copy("/content/drive/MyDrive/fightmind_fine_tuned_model/chunks.json",
             "data/processed/chunks.json")
 
 print(f"chunks.json ready ✅  size={(os.path.getsize('data/processed/chunks.json')/1024/1024):.1f} MB")
 ```
 
-### 8. Run fine-tuning
+### 7. Run fine-tuning
 ```python
 import sys, os
 from pathlib import Path
 
-# Ensure Python can find the src package (Colab shell doesn't inherit sys.path)
+# Make src/ importable — Colab shell doesn't inherit sys.path from %cd
 os.chdir('/content/fightmind-model')
 sys.path.insert(0, '/content/fightmind-model')
 
-# Verify setup
+# Sanity check
 print("Working dir:", os.getcwd())
 print("fine_tune.py exists:", os.path.exists('src/training/fine_tune.py'))
 
@@ -130,49 +120,60 @@ Epoch 1/10: 100%|████████| 264/264 [04:12<00:00]
 INFO | Fine-tuning complete — model saved  [output=.../model_output]
 ```
 
+### 8. Verify saved model
+```python
+import os
+model_output = "/content/drive/MyDrive/fightmind_fine_tuned_model/model_output"
+
+if os.path.exists(model_output):
+    print(f"✅ Model saved at: {model_output}")
+    for f in os.listdir(model_output):
+        print(f"   {f}")
+else:
+    print("❌ model_output not found — check Step 7 output for errors")
+```
+
 ### 9. Download the model to your machine
-After training completes, the model is saved to your Google Drive at:  
-`MyDrive/fightmind_fine_tuned_model/model_output/`
+Model is saved at: `MyDrive/fightmind_fine_tuned_model/model_output/`
 
 Download the **`model_output`** folder and copy its contents to your local repo:
 ```
 fightmind-model/
 └── models/
-    └── fine_tuned/        ← copy all files from model_output/ here
+    └── fine_tuned/        ← copy all ROOT files from model_output/ here (overwrite)
         ├── config.json
-        ├── model.safetensors  (or pytorch_model.bin)
+        ├── model.safetensors
         ├── tokenizer_config.json
-        └── tokenizer.json
+        ├── tokenizer.json
+        ├── vocab.txt
+        ├── modules.json
+        └── 1_Pooling/
 ```
+
+> ℹ️ The `checkpoints/` subfolder inside `model_output/` holds intermediate epoch saves — you can safely delete it.
 
 ---
 
 ## Colab Notebook (copy-paste ready)
-
-Create a new Colab cell for each block below:
 
 **Cell 1 — Setup**
 ```python
 from google.colab import drive
 drive.mount('/content/drive')
 
-# Clone the repo
 !git clone https://github.com/YOUR_USERNAME/fightmind-model.git
-%cd fightmind-model
 
-# ⚠️ Install ONLY fine-tuning packages (not full requirements.txt)
-# Colab pre-installs pandas/requests/fastapi at fixed versions - don't overwrite them
+# Only install fine-tuning packages — don't run pip install -r requirements.txt
 !pip install sentence-transformers==3.4.1 "accelerate>=0.26.0" pyyaml hf_xet --quiet
 ```
 
-**Cell 2 — Copy chunks.json from Drive**
+**Cell 2 — Copy chunks.json**
 ```python
 import shutil, os
 os.makedirs("data/processed", exist_ok=True)
-# chunks.json is in MyDrive/fightmind_fine_tuned_model/ (uploaded in Step 4)
 shutil.copy("/content/drive/MyDrive/fightmind_fine_tuned_model/chunks.json",
             "data/processed/chunks.json")
-print(f"chunks.json ready ✅  size={(os.path.getsize('data/processed/chunks.json')/1024/1024):.1f} MB")
+print(f"chunks.json ready ✅  {os.path.getsize('data/processed/chunks.json')/1024/1024:.1f} MB")
 ```
 
 **Cell 3 — Fine-tune**
@@ -180,7 +181,6 @@ print(f"chunks.json ready ✅  size={(os.path.getsize('data/processed/chunks.jso
 import sys, os
 from pathlib import Path
 
-# Ensure Python can find the src package (Colab shell doesn't inherit sys.path)
 os.chdir('/content/fightmind-model')
 sys.path.insert(0, '/content/fightmind-model')
 
@@ -199,62 +199,53 @@ fine_tune(
 )
 ```
 
-**Cell 4 — Verify saved model**
+**Cell 4 — Verify**
 ```python
 import os
+model_output = "/content/drive/MyDrive/fightmind_fine_tuned_model/model_output"
 
-# sentence-transformers 3.x may save to the root dir OR a checkpoint subfolder
-model_root = "/content/drive/MyDrive/fightmind_fine_tuned_model"
-
-def find_model(base_dir):
-    """Search base_dir and one level of subdirs for config.json (model marker)."""
-    if not os.path.exists(base_dir):
-        print(f"❌ Directory not found: {base_dir}")
-        print("This means training did not complete or the output path is wrong.")
-        return
-
-    print(f"📂 Contents of {base_dir}:")
-    for item in os.listdir(base_dir):
-        print(f"   {item}")
-
-    # Check subdirectories for config.json (in case Trainer saved to a checkpoint folder)
-    for sub in os.listdir(base_dir):
-        sub_path = os.path.join(base_dir, sub)
-        if os.path.isdir(sub_path) and "config.json" in os.listdir(sub_path):
-            print(f"\n✅ Model found in subdirectory: {sub_path}")
-            return sub_path
-
-    if "config.json" in os.listdir(base_dir):
-        print(f"\n✅ Model found at root: {base_dir}")
-        return base_dir
-
-    print("\n⚠️  config.json not found — training may be incomplete. Check Cell 3 output.")
-
-find_model(model_root)
+if os.path.exists(model_output):
+    print(f"✅ Model saved:")
+    for f in os.listdir(model_output):
+        print(f"   {f}")
+else:
+    print("❌ model_output not found — check Cell 3 for errors")
 ```
 
 ---
 
 ## Training Configuration Reference
 
-| Parameter | Colab T4 (recommended) | Local CPU (testing) |
-|-----------|----------------------|---------------------|
-| `--epochs` | 10 | 1 |
-| `--batch-size` | 32 | 8 |
-| `--max-pairs` | 10 000 | 500 |
-| Estimated time | ~45 min | ~10 min (slow) |
+| Parameter | Colab T4 (recommended) | Local CPU (smoke test) |
+|-----------|----------------------|------------------------|
+| `epochs` | 10 | 1 |
+| `batch_size` | 32 | 8 |
+| `max_pairs` | 10 000 | 500 |
+| Estimated time | ~45 min | ~10 min |
+
+> Parameters are passed as Python kwargs to `fine_tune()` in Cell 3, not as CLI flags.
+
+---
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `No module named src.core` | `sys.path` not set | Add `sys.path.insert(0, '/content/fightmind-model')` before imports |
+| `fine_tune.py exists: False` | Old clone (repo not re-cloned after push) | Delete old clone: `shutil.rmtree('/content/fightmind-model')` then re-run Cell 1 |
+| Dependency conflicts on `pip install -r requirements.txt` | Colab has pinned versions of pandas/requests/fastapi | Don't use `requirements.txt` in Colab — install only fine-tuning packages as shown |
+| `accelerate>=0.26.0` not found | Not installed | Add to Cell 1: `!pip install "accelerate>=0.26.0" --quiet` |
 
 ---
 
 ## After Fine-Tuning
 
-Copy the model files to `fightmind-model/models/fine_tuned/` and update `logging.yaml` if needed:
-
-```yaml
-loggers:
-  src.training.fine_tune:
-    development_level: INFO
-    production_level:  WARNING
+1. Download `model_output/` from Google Drive
+2. Copy all files **except** `checkpoints/` into `fightmind-model/models/fine_tuned/` (overwrite existing)
+3. Verify locally:
+```bash
+# Should show config.json, model.safetensors, tokenizer files etc.
+dir models\fine_tuned\
 ```
 
-Then proceed to **Step 1.8 — ChromaDB ingestion**, which will automatically use the fine-tuned model from `models/fine_tuned/`.
+Then proceed to **Step 1.8 — ChromaDB ingestion**, which will automatically load the model from `models/fine_tuned/`.
