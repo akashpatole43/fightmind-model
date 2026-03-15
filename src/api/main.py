@@ -1,275 +1,70 @@
 """
-FightMind AI — FastAPI Entry Point
-====================================
-Phase 1E, Step 1.17–1.18
-
-Handles:
-  - Application startup / shutdown lifecycle
-  - Request/response logging middleware (every request logged with duration)
-  - Global exception handler (unhandled errors → structured 500 response)
-  - CORS for React frontend
-  - /health and /pipeline/process endpoints
+FightMind AI — Core API Server
+==============================
+Step 1.17 — Exposes the Python AI Pipeline via REST API.
+This is the entry point that the Java Spring Boot Backend will communicate with.
 """
 
-import time
-import uuid
-import os
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-from src.core.logging_config import setup_logging, get_logger
+from src.core.logging_config import get_logger, setup_logging
+from src.api.schemas import ChatRequest
+from src.pipeline_runner import run_pipeline, ChatbotResponse
 
-# ── Bootstrap logging FIRST — before any other imports that log ───────────────
+# Initialize logging before booting the app
 setup_logging()
-logger = get_logger("fightmind.api")
+logger = get_logger(__name__)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Application Lifecycle
-# ─────────────────────────────────────────────────────────────────────────────
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Runs at startup and shutdown.
-    Add resource initialisation (ChromaDB, model loading) here in later steps.
-    """
-    logger.info(
-        "FightMind AI service starting up",
-        extra={"env": os.getenv("ENV", "development"), "version": "1.0.0"},
-    )
-    yield   # Application runs here
-    logger.info("FightMind AI service shutting down")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# App Initialisation
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Initialize FastAPI
 app = FastAPI(
-    title="FightMind AI — Model Service",
-    description=(
-        "6-Level AI Pipeline for Boxing, Kickboxing & Karate chatbot.\n\n"
-        "Endpoints:\n"
-        "- `GET /health` — liveness probe (Docker, UptimeRobot)\n"
-        "- `POST /pipeline/process` — main AI pipeline entry point"
-    ),
+    title="FightMind AI Python Backend",
+    description="The internal AI processing engine that classifies intents, searches ChromaDB, and generates LLM responses.",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan,
 )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CORS
-# ─────────────────────────────────────────────────────────────────────────────
-
-_allowed_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:3000",  # React dev servers
-).split(",")
-
+# Apply CORS middleware (Allow Java Backend to call us)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
+    allow_origins=["*"], # For dev, ideally change to localhost:8080 in prod
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Middleware — Log Every Request
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.middleware("http")
-async def request_logging_middleware(request: Request, call_next):
-    """
-    Assigns a unique request_id to every request and logs:
-      - Incoming: method, path, client IP
-      - Outgoing: status code, duration in ms
-
-    The request_id threads through all log lines for that request,
-    making it easy to trace a single request across log lines.
-    """
-    request_id = str(uuid.uuid4())[:8]   # Short 8-char ID, e.g. "a3f2c1b0"
-    start_time = time.monotonic()
-
-    logger.info(
-        "→ Incoming request",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "client": request.client.host if request.client else "unknown",
-        },
-    )
-
-    try:
-        response = await call_next(request)
-    except Exception as exc:
-        # Unexpected error escaped all other handlers — log it with full trace
-        duration_ms = round((time.monotonic() - start_time) * 1000, 2)
-        logger.critical(
-            "Unhandled exception in request",
-            exc_info=exc,
-            extra={"request_id": request_id, "duration_ms": duration_ms},
-        )
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "internal_server_error",
-                "message": "An unexpected error occurred. Please try again.",
-                "request_id": request_id,
-            },
-        )
-
-    duration_ms = round((time.monotonic() - start_time) * 1000, 2)
-
-    log_fn = logger.warning if response.status_code >= 400 else logger.info
-    log_fn(
-        "← Response sent",
-        extra={
-            "request_id": request_id,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
-        },
-    )
-
-    # Pass request_id back to client for support/debugging
-    response.headers["X-Request-ID"] = request_id
-    return response
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Global Exception Handlers
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """
-    Handles FastAPI HTTPExceptions (404, 422, etc.) with structured JSON.
-    Logs at WARNING level since these are expected client errors.
-    """
-    logger.warning(
-        "HTTP exception raised",
-        extra={
-            "status_code": exc.status_code,
-            "detail": exc.detail,
-            "path": request.url.path,
-        },
-    )
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": "http_error",
-            "status_code": exc.status_code,
-            "message": exc.detail,
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    """
-    Catch-all for any unhandled Python exceptions.
-    Logs at ERROR level with full traceback for post-mortem debugging.
-    """
-    logger.error(
-        "Unhandled application exception",
-        exc_info=exc,
-        extra={"path": request.url.path, "method": request.method},
-    )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "internal_server_error",
-            "message": "An unexpected error occurred. Please try again.",
-        },
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Endpoints
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.get("/health", tags=["Health"])
+@app.get("/health", tags=["System"])
 async def health_check():
+    """Simple health probe for Docker / CI/CD monitors."""
+    return {"status": "ok", "service": "fightmind-ai-python"}
+
+
+@app.post("/api/v1/chat", response_model=ChatbotResponse, tags=["AI Pipeline"])
+async def process_chat(request: ChatRequest) -> ChatbotResponse:
     """
-    Liveness probe.
-    Polled by:
-      - Docker Compose healthcheck (every 30s)
-      - UptimeRobot in production (every 14 min to prevent Render sleep)
-
-    Returns 200 when the service is ready to accept requests.
+    Main entry point for incoming chat messages.
+    Invokes the Phase 1D Pipeline (Levels 1 through 6).
     """
-    return {
-        "status": "ok",
-        "service": "fightmind-model",
-        "version": "1.0.0",
-        "environment": os.getenv("ENV", "development"),
-    }
-
-
-@app.post("/pipeline/process", tags=["Pipeline"])
-async def process_query(payload: dict):
-    """
-    Main 6-level AI pipeline endpoint.
-
-    Expected request body:
-    {
-        "text":        "What is a jab?",          # optional if image_url provided
-        "image_url":   "https://...",              # optional if text provided
-        "user_id":     "user-uuid-here",           # required
-        "skill_level": "beginner"                  # beginner | intermediate | advanced
-    }
-
-    Response:
-    {
-        "answer":       "A jab is a quick straight punch...",
-        "confidence":   0.92,
-        "sources":      [{"title": "Boxing", "url": "..."}],
-        "level_outputs": { "L1": {...}, "L3": {...} }
-    }
-
-    Full pipeline implementation is added step-by-step in Phase 1D (Steps 1.10–1.16).
-    """
-    user_id = payload.get("user_id", "anonymous")
-    has_text = bool(payload.get("text"))
-    has_image = bool(payload.get("image_url"))
-
-    # Validate: at least one input must be provided
-    if not has_text and not has_image:
-        logger.warning(
-            "Pipeline request rejected — no text or image provided",
-            extra={"user_id": user_id},
+    logger.info("Received /api/v1/chat request", extra={"query_length": len(request.query)})
+    
+    try:
+        # Run the synchronous pipeline 
+        # (In the future, for high concurrency, we might want run_in_threadpool)
+        response: ChatbotResponse = run_pipeline(
+            query=request.query,
+            image_url=request.image_url
         )
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": "validation_error",
-                "message": "Provide at least one of: 'text' or 'image_url'.",
-            },
+        return response
+        
+    except Exception as exc:
+        logger.error("Unhandled exception escaping pipeline_runner", exc_info=exc)
+        raise HTTPException(
+            status_code=500,
+            detail="FightMind AI encountered a critical error while processing the request."
         )
 
-    logger.info(
-        "Pipeline request received",
-        extra={
-            "user_id": user_id,
-            "has_text": has_text,
-            "has_image": has_image,
-            "skill_level": payload.get("skill_level", "unknown"),
-        },
-    )
-
-    # ── Placeholder — replaced by pipeline_runner.py in Step 1.16 ────────────
-    return {
-        "answer": "FightMind AI is online. Full pipeline coming in Phase 1D.",
-        "confidence": 1.0,
-        "sources": [],
-        "level_outputs": {},
-    }
+if __name__ == "__main__":
+    import uvicorn
+    # If run directly via python src/api/main.py
+    uvicorn.run("src.api.main:app", host="0.0.0.0", port=8000, reload=True)

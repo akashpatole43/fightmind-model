@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+.env
+
+# Don't copy virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Don't copy raw scraping data or tmp files
+data/raw/
+logs/
+.log
+
+# Don't accidentally copy large internal state
+.gemini/

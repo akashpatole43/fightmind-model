@@ -54,11 +54,11 @@ L2  Vision Processing  — (✅ Done) Gemini Vision analyzes image (if provided)
     ▼
 L3  RAG Retrieval      — (✅ Done) search ChromaDB knowledge base
     ▼
-L4  Live Events        — inject real match data (event queries only)
+L4  Live Events        — (✅ Done) inject real match data (event queries only)
     ▼
-L5  LLM Generation     — Gemini 1.5 Flash generates the answer
+L5  LLM Generation     — (✅ Done) Gemini 2.0 Flash generates the answer
     ▼
-L6  Personalization    — adapt tone to skill level, update profile
+L6  Personalization    — (✅ Done) adapt tone to skill level, update profile
     │
     ▼
 Final Response → Java Backend → React Frontend → User
