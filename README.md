@@ -32,10 +32,11 @@
 | 1.5 | `sports_api.py` — live events (3-source fallback) | ✅ |
 | 1.6 | `preprocess.py` — clean + chunk raw data | ✅ |
 | 1.7 | `fine_tune.py` — fine-tune embedding model (Colab) | ✅ |
-| 1.8 | `vector_store.py` — ChromaDB ingestion | 🔄 |
-| 1.9 | RAG retrieval accuracy tests | ⬜ |
+| 1.8 | `vector_store.py` — ChromaDB ingestion | ✅ |
+| 1.9 | RAG retrieval accuracy tests | ✅ |
 | 1.10–1.16 | 6-level pipeline (L1 intent → L6 validate) | ⬜ |
 | 1.17–1.19 | FastAPI endpoints + health check | ⬜ |
+| 1.20 | Model accuracy improvements (>95% MRR) | ⬜ |
 
 ---
 
@@ -47,11 +48,11 @@ This service is the AI brain of FightMind. Every user query flows through a 6-le
 User Input (text / image / both)
     │
     ▼
-L1  Intent Detection   — what is the user asking?
+L1  Intent Detection   — (✅ Done) classify user query using Gemini 2.0 Flash
     ▼
-L2  Vision Processing  — Gemini Vision analyzes image (if provided)
+L2  Vision Processing  — (✅ Done) Gemini Vision analyzes image (if provided)
     ▼
-L3  RAG Retrieval      — search ChromaDB knowledge base
+L3  RAG Retrieval      — (✅ Done) search ChromaDB knowledge base
     ▼
 L4  Live Events        — inject real match data (event queries only)
     ▼
@@ -216,7 +217,19 @@ python -m src.training.fine_tune --epochs 1 --batch-size 8 --max-pairs 500
 
 After training, copy the model files to `models/fine_tuned/`.
 
-> ⚠️ **Run in order:** scraper → sports_api → preprocess → fine_tune → ChromaDB (Step 1.8)
+### Step 5 — Build ChromaDB vector store (`embeddings/vectorstore/`)
+```bash
+# Embeds all chunks using your fine-tuned model and saves to disk
+python -m src.rag.vector_store
+```
+
+> ⚠️ **Run in order:** scraper → sports_api → preprocess → fine_tune → ChromaDB
+
+### Step 6 — Evaluate model accuracy
+```bash
+# Tests RAG retrieval performance on predefined queries
+python -m src.training.evaluate
+```
 
 
 ---

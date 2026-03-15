@@ -13,6 +13,8 @@ pyyaml==6.0.2                  # load logging.yaml config
 
 # ── Google Gemini ─────────────────────────
 google-generativeai==0.8.3
+google-genai==0.4.0            # new official SDK for structured outputs
+pydantic==2.10.5               # required for structured outputs schema
 
 # ── RAG / Embeddings ──────────────────────
 chromadb>=0.6.3

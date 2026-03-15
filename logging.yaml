@@ -90,6 +90,11 @@ loggers:
     development_level: INFO
     production_level:  INFO
 
+  # ── RAG / Vector Store ──────────────────────────────────────────────────────
+  src.rag.vector_store:
+    development_level: DEBUG
+    production_level:  INFO
+
   # ── Core Utilities ──────────────────────────────────────────────────────────
   src.core.logging_config:
     development_level: INFO
