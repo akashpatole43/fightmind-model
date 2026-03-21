@@ -41,10 +41,10 @@ class TestRetrieveContext:
 
     def test_standard_text_search(self, mock_search):
         """Happy path — text query is mapped directly to a search with sport filters."""
-        # Setup mock db return
+        # Setup mock db return (uses the correct `text` and `score` keys)
         mock_search.return_value = [
-            {"chunk_text": "A jab is...", "similarity_score": 0.85},
-            {"chunk_text": "Keep hands up...", "similarity_score": 0.60}
+            {"text": "A jab is...", "score": 0.85},
+            {"text": "Keep hands up...", "score": 0.60}
         ]
         
         intent = IntentResult(
@@ -56,21 +56,23 @@ class TestRetrieveContext:
         
         result = retrieve_context("how to jab", intent_result=intent)
         
-        # Verify Search arguments
+        # Verify Search arguments use the new Step 1.20 reranking signature
         mock_search.assert_called_once_with(
             query="how to jab",
-            top_k=3,
-            sport_filter="boxing"
+            top_k=10,
+            sport="boxing",
+            rerank=True,
+            rerank_top_n=3,
         )
         
-        # Verify output parsing
+        # Verify output parsing uses `text` key
         assert result.max_score == 0.85
         assert len(result.retrieved_chunks) == 2
         assert result.retrieved_chunks[0] == "A jab is..."
 
     def test_vision_augmentation(self, mock_search):
         """If an image was uploaded, L2's text should be appended to the RAG query."""
-        mock_search.return_value = [{"chunk_text": "Roundhouse...", "similarity_score": 0.9}]
+        mock_search.return_value = [{"text": "Roundhouse...", "score": 0.9}]
         
         intent = IntentResult(
             category=IntentCategory.TECHNIQUE,
@@ -90,8 +92,10 @@ class TestRetrieveContext:
         # Verify the query was rewritten to include the image context
         mock_search.assert_called_once_with(
             query="what is this? [Image Context: A high kick.] [Techniques: Roundhouse Kick]",
-            top_k=3,
-            sport_filter=None   # UNKNOWN sport shouldn't pass a filter
+            top_k=10,
+            sport=None,   # UNKNOWN sport shouldn't pass a filter
+            rerank=True,
+            rerank_top_n=3,
         )
         
         assert result.max_score == 0.9

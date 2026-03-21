@@ -50,7 +50,7 @@ CHROMA_DIR    = _PROJECT_ROOT / "embeddings" / "vectorstore"
 
 COLLECTION_NAME = "fightmind_chunks"
 DEFAULT_BATCH   = 64          # chunks per ChromaDB upsert call
-DEFAULT_TOP_K   = 5
+DEFAULT_TOP_K   = 10          # fetch more candidates so the cross-encoder has room to re-rank
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -69,9 +69,13 @@ def _load_model(model_dir: Path):
         logger.info("Loading fine-tuned embedding model", extra={"model_dir": str(model_dir)})
         return SentenceTransformer(str(model_dir))
 
-    fallback = "sentence-transformers/all-MiniLM-L6-v2"
+    # bge-small-en-v1.5 is state-of-the-art for dense retrieval:
+    # • Ranked top-3 on the BEIR benchmark as of 2024.
+    # • Only 33M parameters — fast on CPU, same speed as MiniLM.
+    # • Significantly better at domain-specific vocabulary than MiniLM.
+    fallback = "BAAI/bge-small-en-v1.5"
     logger.warning(
-        "Fine-tuned model not found — falling back to base model",
+        "Fine-tuned model not found — falling back to BGE base model",
         extra={"model_dir": str(model_dir), "fallback": fallback},
     )
     return SentenceTransformer(fallback)
@@ -237,6 +241,8 @@ def search(
     top_k:       int           = DEFAULT_TOP_K,
     persist_dir: Path          = CHROMA_DIR,
     model_dir:   Path          = MODEL_DIR,
+    rerank:      bool          = False,    # Step 1.20: Cross-encoder re-ranking
+    rerank_top_n: int          = 3,        # Final number of results after re-ranking
 ) -> list[dict]:
     """Semantic search over the vector store.
 
@@ -318,8 +324,15 @@ def search(
             "sport":   sport,
             "top_k":   top_k,
             "results": len(output),
+            "rerank":  rerank,
         },
     )
+
+    # ── Optional Cross-Encoder Re-Ranking (Step 1.20) ──────────────────────
+    if rerank and output:
+        from src.rag.reranker import rerank as run_rerank
+        output = run_rerank(query=query, candidates=output, top_n=rerank_top_n)
+
     return output
 
 

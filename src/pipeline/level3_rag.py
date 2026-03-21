@@ -43,7 +43,7 @@ def retrieve_context(
     query: str,
     intent_result: IntentResult,
     vision_result: Optional[VisionResult] = None,
-    top_k: int = 3
+    top_k: int = 10,        # Step 1.20: Fetch 10 candidates for cross-encoder to re-rank
 ) -> RagResult:
     """
     Searches the RAG ChromaDB database intelligently based on prior pipeline levels.
@@ -93,7 +93,14 @@ def retrieve_context(
     logger.info("Executing RAG search", extra={"query": search_query, "filter": sport_filter})
     
     try:
-        raw_results = search(query=search_query, top_k=top_k, sport=sport_filter)
+        # Step 1.20: Fetch the larger pool (top_k=10), then cross-encoder re-ranks to top 3
+        raw_results = search(
+            query=search_query,
+            top_k=top_k,
+            sport=sport_filter,
+            rerank=True,
+            rerank_top_n=3,
+        )
         
         if not raw_results:
             return RagResult(retrieved_chunks=[], max_score=0.0, used_fallback=False)

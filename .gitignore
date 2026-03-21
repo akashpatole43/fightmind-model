@@ -216,6 +216,7 @@ data/processed/
 
 # Trained model weights — download from Colab/HuggingFace after fine-tuning
 models/fine_tuned/
+models/fine_tuned_minilm_backup/
 
 # ChromaDB vector store — rebuilt from chunks.json in Step 1.8
 embeddings/vectorstore/
