@@ -1,58 +1,35 @@
 """
 FightMind AI — Level 6: Validation & Personalization
 ======================================================
-Step 1.15 — The final guardrail before the answer reaches the user.
+Step 4.5 — Replaced Gemini API call with a fully LOCAL rule-based checker.
 
-Takes the completed answer from L5 and reviews it using Gemini 2.0 Flash to detect 
-hallucinations, ensure safety, and extract the user's estimated skill level for future RAG profile tracking.
+This eliminates 1 Gemini API call per request (saves ~33% API cost).
+
+Three local checks are performed:
+1. Safety Check     — keyword scan for dangerous/illegal content in the answer
+2. Hallucination    — word-overlap score between answer and RAG source chunks
+3. Skill Profiling  — keyword scan of the user query to estimate experience level
 """
 
 from enum import Enum
-import os
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
-
-from google import genai
-from google.genai import types
+from typing import Optional
+from pydantic import BaseModel
 
 from src.core.logging_config import get_logger
 from src.pipeline.level3_rag import RagResult
 
 logger = get_logger(__name__)
-load_dotenv()
-
-_client = None
-
-def get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        api_key = os.getenv("GEMINI_API_KEY")
-        _client = genai.Client(api_key=api_key)
-    return _client
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Structured Output Schema
+# Output Schema (unchanged — same contract as before)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SkillLevel(str, Enum):
-    BEGINNER = "BEGINNER"
+    BEGINNER     = "BEGINNER"
     INTERMEDIATE = "INTERMEDIATE"
-    ADVANCED = "ADVANCED"
-    UNKNOWN = "UNKNOWN"
-
-# We can run into the Enum validation bug with pydantic/genai here too.
-# So we use string fields for the LLM Output, and map it later.
-class _GeminiValidationResult(BaseModel):
-    is_safe: bool = Field(
-        description="True if the response is safe. False if it encourages street fighting, illegal acts, or dangerous, untrained techniques."
-    )
-    hallucination_detected: bool = Field(
-        description="True if the LLM generated answer claims false facts or contradicts the provided RAG text chunks."
-    )
-    detected_skill_level: str = Field(
-        description="Must be exactly one of: BEGINNER, INTERMEDIATE, ADVANCED, or UNKNOWN. Estimate based on the complexity of the user's query."
-    )
+    ADVANCED     = "ADVANCED"
+    UNKNOWN      = "UNKNOWN"
 
 
 class ValidationResult(BaseModel):
@@ -62,113 +39,196 @@ class ValidationResult(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prompt Engineering
+# Rule Sets
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_INSTRUCTION = """You are FightMind AI's internal safety and quality auditor.
-Review the following User Query, the verified Knowledge Base Text, and the final Generated Answer.
+# Words that indicate the answer may be promoting dangerous/illegal behaviour
+_UNSAFE_KEYWORDS = [
+    "street fight", "kill", "murder", "illegal weapon", "eye gouge",
+    "groin strike", "fish hook", "bite", "headbutt", "use a knife",
+    "attack someone", "how to hurt", "how to assault", "unregulated fight",
+    "no rules", "backyard fight", "unsanctioned",
+]
 
-Your job is to:
-1. Detect Hallucinations: If the Generated Answer states facts that contradict the Knowledge Base Text, flag hallucination_detected as True. (If knowledge base is empty, just check for obvious martial arts falsehoods).
-2. Assess Safety: If the Generated Answer encourages street fighting, illegal acts, or dangerous techniques without proper warnings, flag is_safe as False.
-3. Profile Skill: Estimate the user's combat sports experience based on the phrasing and technical depth of their query (BEGINNER, INTERMEDIATE, ADVANCED, or UNKNOWN).
+# Query keywords that indicate an advanced user
+_ADVANCED_KEYWORDS = [
+    "southpaw", "orthodox", "counterpunch", "combination", "footwork drill",
+    "head movement", "parry", "shoulder roll", "philly shell", "peek-a-boo",
+    "clinch work", "thai plum", "teep", "switch kick", "spinning back",
+    "compound combination", "level change", "cage control", "ground and pound",
+    "guard pass", "sprawl", "underhook", "overhook", "double leg",
+]
 
-Return strictly JSON according to the schema.
-"""
-
-def _build_validation_prompt(query: str, rag_res: RagResult, generated_answer: str) -> str:
-    """Combines the query, context, and generated answer for review."""
-    
-    prompt_parts = [
-        f"USER QUERY:\n{query}\n"
-    ]
-    
-    if rag_res and rag_res.retrieved_chunks:
-        chunks_str = "\n".join([f"- {c}" for c in rag_res.retrieved_chunks])
-        prompt_parts.append(f"\nVERIFIED KNOWLEDGE BASE TEXT:\n{chunks_str}\n")
-    else:
-        prompt_parts.append("\nVERIFIED KNOWLEDGE BASE TEXT:\nNone provided.\n")
-        
-    prompt_parts.append(f"\nGENERATED ANSWER TO REVIEW:\n{generated_answer}\n")
-    
-    return "\n".join(prompt_parts)
+# Query keywords that indicate a beginner user
+_BEGINNER_KEYWORDS = [
+    "what is", "how do i", "explain", "beginner", "newbie", "start",
+    "first time", "never trained", "basics", "basic", "introduction",
+    "simple", "easy", "learn", "how to", "i am new",
+]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Implementation
+# Local Checkers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def validate_answer(query: str, rag_res: RagResult, generated_answer: str) -> ValidationResult:
+def _check_safety(answer: str) -> bool:
     """
-    Final pipeline step. Reviews the L5 answer for safety and extracts user profile data.
+    Returns True (safe) if no unsafe keywords are found in the answer.
+    O(n) keyword scan — runs in microseconds.
     """
-    logger.info("Level 6: Validating answer and extracting user skill profile...")
-    
-    compiled_prompt = _build_validation_prompt(query, rag_res, generated_answer)
-    
-    try:
-        response = get_client().models.generate_content(
-            model='gemini-2.0-flash',
-            contents=compiled_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.1, # strict analysis
-                response_mime_type="application/json",
-                response_schema=_GeminiValidationResult,
-            ),
-        )
-        
-        raw_res = response.parsed
-        if raw_res is None:
-            raise ValueError("Gemini SDK returned None during validation Pydantic parsing.")
-            
-        # Map string enum safely
-        skill_str = raw_res.detected_skill_level.upper()
-        skill_enum = SkillLevel.UNKNOWN
-        if skill_str in [e.value for e in SkillLevel]:
-            skill_enum = SkillLevel(skill_str)
-            
-        result = ValidationResult(
-            is_safe=raw_res.is_safe,
-            hallucination_detected=raw_res.hallucination_detected,
-            detected_skill_level=skill_enum
-        )
-        
-        logger.info(
-            "Validation complete", 
-            extra={
-                "safe": result.is_safe, 
-                "hallucination": result.hallucination_detected, 
-                "skill": result.detected_skill_level.value
-            }
-        )
-        
-        return result
+    answer_lower = answer.lower()
+    for keyword in _UNSAFE_KEYWORDS:
+        if keyword in answer_lower:
+            logger.warning("Level 6: Unsafe keyword detected in answer", extra={"keyword": keyword})
+            return False
+    return True
 
-    except Exception as exc:
-        logger.error("Level 6 validation failed, defaulting to safe/unknown", exc_info=exc)
-        # Fail open rather than crashing the whole bot
-        return ValidationResult(
-            is_safe=True,
-            hallucination_detected=False,
-            detected_skill_level=SkillLevel.UNKNOWN
-        )
 
+def _check_hallucination(answer: str, rag_res: Optional[RagResult]) -> bool:
+    """
+    Estimates hallucination using a word-overlap score.
+
+    Logic:
+    - If no RAG chunks were used, we can't check → return False (benefit of doubt)
+    - Tokenise the answer and each RAG chunk into word sets
+    - If the answer shares < 5% of its unique words with ALL chunks combined,
+      it's likely the LLM ignored the context → flag as hallucination
+
+    This is a simple but effective heuristic. False positive rate is low
+    because any answer that uses even a few domain-specific terms from the
+    RAG chunks will pass the threshold.
+    """
+    if not rag_res or not rag_res.retrieved_chunks:
+        return False  # No RAG context to compare against → cannot detect
+
+    # Build a set of all meaningful words from RAG chunks (ignore short stop words)
+    rag_words: set[str] = set()
+    for chunk in rag_res.retrieved_chunks:
+        for word in chunk.lower().split():
+            clean = word.strip(".,!?\"'();:")
+            if len(clean) > 3:  # ignore 'the', 'is', 'a', etc.
+                rag_words.add(clean)
+
+    if not rag_words:
+        return False
+
+    # Build word set from the answer
+    answer_words: set[str] = set()
+    for word in answer.lower().split():
+        clean = word.strip(".,!?\"'();:")
+        if len(clean) > 3:
+            answer_words.add(clean)
+
+    if not answer_words:
+        return False
+
+    # Overlap ratio: what fraction of answer words appear in the RAG corpus
+    overlap = len(answer_words & rag_words)
+    overlap_ratio = overlap / len(answer_words)
+
+    hallucination = overlap_ratio < 0.05  # less than 5% overlap → suspicious
+    if hallucination:
+        logger.warning(
+            "Level 6: Low RAG overlap — possible hallucination",
+            extra={"overlap_ratio": round(overlap_ratio, 3)}
+        )
+    return hallucination
+
+
+def _detect_skill_level(query: str) -> SkillLevel:
+    """
+    Estimates user skill level from the vocabulary used in their query.
+    Simple keyword scan — runs in microseconds.
+    """
+    query_lower = query.lower()
+
+    # Check advanced first (takes priority)
+    for keyword in _ADVANCED_KEYWORDS:
+        if keyword in query_lower:
+            return SkillLevel.ADVANCED
+
+    for keyword in _BEGINNER_KEYWORDS:
+        if keyword in query_lower:
+            return SkillLevel.BEGINNER
+
+    return SkillLevel.UNKNOWN
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main Entry Point (same signature as before — drop-in replacement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def validate_answer(query: str, rag_res: Optional[RagResult], generated_answer: str) -> ValidationResult:
+    """
+    Final pipeline guardrail. Runs fully locally — zero API calls.
+
+    Args:
+        query:            The original user query.
+        rag_res:          RAG retrieval result (used for hallucination check).
+        generated_answer: The answer produced by Level 5.
+
+    Returns:
+        ValidationResult with is_safe, hallucination_detected, detected_skill_level.
+    """
+    logger.info("Level 6: Running local validation checks...")
+
+    is_safe            = _check_safety(generated_answer)
+    hallucination      = _check_hallucination(generated_answer, rag_res)
+    skill              = _detect_skill_level(query)
+
+    result = ValidationResult(
+        is_safe=is_safe,
+        hallucination_detected=hallucination,
+        detected_skill_level=skill,
+    )
+
+    logger.info(
+        "Level 6 local validation complete",
+        extra={
+            "safe": result.is_safe,
+            "hallucination": result.hallucination_detected,
+            "skill": result.detected_skill_level.value,
+        }
+    )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manual Test
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     from src.core.logging_config import setup_logging
     setup_logging()
-    
-    print("\n--- Testing Level 6 Validation (Safe) ---")
-    safe_q = "How do I throw a jab?"
-    safe_rag = RagResult(retrieved_chunks=["Keep your chin tucked."], max_score=0.9, used_fallback=False)
-    safe_ans = "To throw a jab, extend your lead hand straight out while keeping your chin tucked for protection."
-    res1 = validate_answer(safe_q, safe_rag, safe_ans)
+
+    print("\n--- Test 1: Safe answer (beginner query) ---")
+    res1 = validate_answer(
+        query="How do I throw a jab?",
+        rag_res=RagResult(retrieved_chunks=["Keep your chin tucked. Extend your lead hand straight out."], max_score=0.9, used_fallback=False),
+        generated_answer="To throw a jab, extend your lead hand straight out while keeping your chin tucked for protection."
+    )
     print(f"Safe: {res1.is_safe} | Hallucinates: {res1.hallucination_detected} | Skill: {res1.detected_skill_level.value}")
-    
-    print("\n--- Testing Level 6 Validation (Hallucination) ---")
-    bad_q = "Who won UFC 300 main event?"
-    bad_rag = RagResult(retrieved_chunks=["UFC 300 main event was Alex Pereira vs Jamahal Hill."], max_score=0.9, used_fallback=False)
-    bad_ans = "Conor McGregor won UFC 300 by knockout."
-    res2 = validate_answer(bad_q, bad_rag, bad_ans)
+
+    print("\n--- Test 2: Unsafe answer ---")
+    res2 = validate_answer(
+        query="How do I win a street fight?",
+        rag_res=None,
+        generated_answer="In a street fight with no rules, you can eye gouge or bite your opponent to escape."
+    )
     print(f"Safe: {res2.is_safe} | Hallucinates: {res2.hallucination_detected} | Skill: {res2.detected_skill_level.value}")
+
+    print("\n--- Test 3: Hallucination detection ---")
+    res3 = validate_answer(
+        query="Who won UFC 300 main event?",
+        rag_res=RagResult(retrieved_chunks=["UFC 300 main event was Alex Pereira vs Jamahal Hill."], max_score=0.9, used_fallback=False),
+        generated_answer="Conor McGregor won UFC 300 by knockout in round one against Khabib Nurmagomedov."
+    )
+    print(f"Safe: {res3.is_safe} | Hallucinates: {res3.hallucination_detected} | Skill: {res3.detected_skill_level.value}")
+
+    print("\n--- Test 4: Advanced user query ---")
+    res4 = validate_answer(
+        query="How do I use the philly shell to set up a counter left hook?",
+        rag_res=None,
+        generated_answer="Drop your lead shoulder, roll under the jab, and fire the left hook off the back foot."
+    )
+    print(f"Safe: {res4.is_safe} | Hallucinates: {res4.hallucination_detected} | Skill: {res4.detected_skill_level.value}")

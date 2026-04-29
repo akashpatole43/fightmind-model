@@ -3,8 +3,14 @@ FightMind AI — Level 5: LLM Answer Generation
 =============================================
 Step 1.14 — The "Brain" of the chatbot.
 
-Takes the user's original query and injects the context gathered from Levels 1-4
-into a giant prompt for Gemini 2.0 Flash to generate the final, expert response.
+Step 4.9 UPDATE — Added Groq as an automatic fallback when Gemini
+returns a 429 RESOURCE_EXHAUSTED error. The fallback chain is:
+
+  1. Try Gemini (gemini-2.5-flash) — primary, paid tier
+  2. On 429 → automatically switch to Groq (llama-3.3-70b) — free fallback
+  3. On any other error → return hardcoded fallback string
+
+This ensures users never see a rate-limit error, even during traffic spikes.
 """
 
 from typing import Optional
@@ -12,7 +18,10 @@ from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
+import groq as groq_sdk
 
+import json
 import os
 from dotenv import load_dotenv
 
@@ -25,15 +34,26 @@ from src.pipeline.level4_events import EventsResult
 logger = get_logger(__name__)
 load_dotenv()
 
-# We initialize this lazily so pytests can mock the environment or the client
-_client = None
+# ─────────────────────────────────────────────────────────────────────────────
+# Lazy Clients
+# ─────────────────────────────────────────────────────────────────────────────
 
-def get_client() -> genai.Client:
-    global _client
-    if _client is None:
+_gemini_client = None
+_groq_client   = None
+
+def get_gemini_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
         api_key = os.getenv("GEMINI_API_KEY")
-        _client = genai.Client(api_key=api_key)
-    return _client
+        _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
+
+def get_groq_client() -> groq_sdk.Groq:
+    global _groq_client
+    if _groq_client is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        _groq_client = groq_sdk.Groq(api_key=api_key)
+    return _groq_client
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,26 +90,26 @@ CRITICAL RULES:
 """
 
 def _build_prompt(
-    query: str, 
-    intent: IntentResult, 
-    vision_res: Optional[VisionResult], 
-    rag_res: Optional[RagResult], 
+    query: str,
+    intent: IntentResult,
+    vision_res: Optional[VisionResult],
+    rag_res: Optional[RagResult],
     events_res: Optional[EventsResult]
 ) -> str:
     """Compiles all gathered data into a single, cohesive prompt string."""
-    
+
     prompt_parts = [
         f"USER QUERY:\n{query}\n",
         f"DETECTED INTENT:\nCategory: {intent.category.value} | Target Sport: {intent.sport}\n"
     ]
-    
+
     if vision_res and vision_res.description:
         prompt_parts.append(
             f"\n[USER UPLOADED IMAGE]\n"
             f"The user uploaded an image. Description: {vision_res.description}\n"
             f"Detected techniques: {', '.join(vision_res.extracted_techniques) if vision_res.extracted_techniques else 'None'}\n"
         )
-        
+
     if rag_res and rag_res.retrieved_chunks:
         chunks_str = "\n\n".join([f"--- CHUNK ---\n{c}" for c in rag_res.retrieved_chunks])
         prompt_parts.append(
@@ -97,21 +117,75 @@ def _build_prompt(
             f"Use the following excerpts from our validated combat sports database to answer the query:\n"
             f"{chunks_str}\n"
         )
-        
+
     if events_res and events_res.has_events:
         prompt_parts.append(
             f"\n[LIVE EVENTS CONTEXT]\n"
             f"Use the following up-to-date schedule to answer the user's event query:\n"
             f"{events_res.event_context}\n"
         )
-        
+
     prompt_parts.append("\nINSTRUCTIONS:\nBased on the above query and context, please generate the final response.")
-    
+
     return "\n".join(prompt_parts)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Implementation
+# Provider Implementations
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _call_gemini(compiled_prompt: str) -> LlmResult:
+    """Calls Gemini with structured JSON output. Raises on any error."""
+    response = get_gemini_client().models.generate_content(
+        model=os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'),
+        contents=compiled_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0.4,
+            response_mime_type="application/json",
+            response_schema=LlmResult,
+        ),
+    )
+    llm_result = response.parsed
+    if llm_result is None:
+        raise ValueError("Gemini SDK returned None for parsed Pydantic object.")
+    return llm_result
+
+
+def _call_groq(compiled_prompt: str) -> LlmResult:
+    """
+    Calls Groq (Llama 3.3 70B) as fallback. Groq doesn't support structured
+    JSON output schemas natively, so we ask it to respond in JSON format
+    and parse it manually.
+    """
+    groq_system = (
+        SYSTEM_INSTRUCTION +
+        "\n\nIMPORTANT: You MUST respond with valid JSON only, in this exact format:\n"
+        '{"answer": "<your answer here>", "confidence": <0.0 to 1.0>, "used_fallback": false}'
+    )
+
+    chat_completion = get_groq_client().chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": groq_system},
+            {"role": "user",   "content": compiled_prompt},
+        ],
+        temperature=0.4,
+        response_format={"type": "json_object"},
+    )
+
+    raw_text = chat_completion.choices[0].message.content
+    parsed   = json.loads(raw_text)
+
+    return LlmResult(
+        answer=parsed.get("answer", ""),
+        confidence=float(parsed.get("confidence", 0.7)),
+        used_fallback=False,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main Entry Point
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_answer(
@@ -122,8 +196,8 @@ def generate_answer(
     events_res: Optional[EventsResult] = None
 ) -> LlmResult:
     """
-    The final compilation step of the LLM pipeline. 
-    Takes all multi-modal context and generates the human-readable answer.
+    The final compilation step of the LLM pipeline.
+    Tries Gemini first, automatically falls back to Groq on 429.
     """
     # 1. Short-Circuit: Out of Domain
     if intent.category == IntentCategory.OUT_OF_DOMAIN:
@@ -138,31 +212,36 @@ def generate_answer(
     compiled_prompt = _build_prompt(query, intent, vision_res, rag_res, events_res)
     logger.debug("Prompt compiled for Level 5 LLM Generation")
 
-    # 3. Call Gemini
+    # 3. Try Gemini (primary)
     try:
-        response = get_client().models.generate_content(
-            model='gemini-2.0-flash',
-            contents=compiled_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.4, # slightly creative but grounded
-                response_mime_type="application/json",
-                response_schema=LlmResult,
-            ),
-        )
-        
-        # Parse Pydantic response
-        llm_result = response.parsed
-        
-        # Bug fix: genai SDK pydantic parsing sometimes fails silently and returns None if schema validates improperly
-        if llm_result is None:
-            raise ValueError("Gemini SDK returned None for parsed Pydantic object.")
-            
-        logger.info("Successfully generated L5 answer", extra={"confidence": llm_result.confidence})
-        return llm_result
+        result = _call_gemini(compiled_prompt)
+        logger.info("L5 answer generated via Gemini", extra={"confidence": result.confidence})
+        return result
 
-    except Exception as exc:
-        logger.error("Level 5 LLM Generation failed", exc_info=exc)
+    except genai_errors.ClientError as gemini_exc:
+        # Check if it's specifically a rate-limit (429) error
+        if "429" in str(gemini_exc) or "RESOURCE_EXHAUSTED" in str(gemini_exc):
+            logger.warning("Gemini rate limit hit (429) — switching to Groq fallback")
+        else:
+            # For other Gemini errors (auth, model not found, etc.) skip to hardcoded fallback
+            logger.error("Gemini ClientError (non-429) — skipping Groq", exc_info=gemini_exc)
+            return LlmResult(
+                answer="I apologize, but I encountered an internal error while trying to think of the answer. Please try asking again.",
+                confidence=0.0,
+                used_fallback=True
+            )
+
+    except Exception as gemini_exc:
+        logger.warning("Gemini unexpected error — switching to Groq fallback", exc_info=gemini_exc)
+
+    # 4. Groq fallback (triggered only on 429 or unexpected Gemini errors)
+    try:
+        result = _call_groq(compiled_prompt)
+        logger.info("L5 answer generated via Groq fallback", extra={"confidence": result.confidence})
+        return result
+
+    except Exception as groq_exc:
+        logger.error("Groq fallback also failed", exc_info=groq_exc)
         return LlmResult(
             answer="I apologize, but I encountered an internal error while trying to think of the answer. Please try asking again.",
             confidence=0.0,
@@ -170,15 +249,18 @@ def generate_answer(
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Manual Test
+# ─────────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     from src.core.logging_config import setup_logging
     setup_logging()
-    
-    # Fake a user asking about a technique, with some RAG context
+
     fake_intent = IntentResult(category=IntentCategory.TECHNIQUE, sport="BOXING", confidence=0.99, extracted_entities=[])
-    fake_rag = RagResult(retrieved_chunks=["To throw a proper jab, keep your chin tucked, step in with your lead foot, and turn your knuckles over at the end of the punch. Rotate your shoulder to protect your chin."], max_score=0.88, used_fallback=False)
-    
-    print("\n--- Testing Level 5 LLM Generation ---")
+    fake_rag    = RagResult(retrieved_chunks=["To throw a proper jab, keep your chin tucked, step in with your lead foot, and turn your knuckles over at the end of the punch. Rotate your shoulder to protect your chin."], max_score=0.88, used_fallback=False)
+
+    print("\n--- Testing Level 5 LLM Generation (Gemini → Groq fallback) ---")
     res = generate_answer(
         query="How do I throw a jab safely?",
         intent=fake_intent,
@@ -186,5 +268,5 @@ if __name__ == "__main__":
         rag_res=fake_rag,
         events_res=None
     )
-    
+
     print(f"\nFinal Answer (Confidence: {res.confidence}):\n{res.answer}\n")

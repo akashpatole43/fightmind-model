@@ -130,7 +130,7 @@ def detect_intent(
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'),
             contents=text,
             config=genai.types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
