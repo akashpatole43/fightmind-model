@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from bs4 import BeautifulSoup
 
 from src.core.logging_config import get_logger
 
@@ -316,6 +315,7 @@ def _fetch_scraped_events(target_date: Optional[str] = None) -> list[Event]:
             continue
 
         try:
+            from bs4 import BeautifulSoup
             soup = BeautifulSoup(resp.text, "html.parser")
 
             # Try to find event containers — simple heuristic: look for rows or event divs
