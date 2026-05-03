@@ -219,22 +219,12 @@ def generate_answer(
         return result
 
     except genai_errors.ClientError as gemini_exc:
-        # Check if it's specifically a rate-limit (429) error
-        if "429" in str(gemini_exc) or "RESOURCE_EXHAUSTED" in str(gemini_exc):
-            logger.warning("Gemini rate limit hit (429) — switching to Groq fallback")
-        else:
-            # For other Gemini errors (auth, model not found, etc.) skip to hardcoded fallback
-            logger.error("Gemini ClientError (non-429) — skipping Groq", exc_info=gemini_exc)
-            return LlmResult(
-                answer="I apologize, but I encountered an internal error while trying to think of the answer. Please try asking again.",
-                confidence=0.0,
-                used_fallback=True
-            )
+        logger.warning(f"Gemini ClientError ({gemini_exc}) — switching to Groq fallback")
 
     except Exception as gemini_exc:
-        logger.warning("Gemini unexpected error — switching to Groq fallback", exc_info=gemini_exc)
+        logger.warning(f"Gemini unexpected error ({gemini_exc}) — switching to Groq fallback", exc_info=gemini_exc)
 
-    # 4. Groq fallback (triggered only on 429 or unexpected Gemini errors)
+    # 4. Groq fallback (triggered if Gemini fails for ANY reason)
     try:
         result = _call_groq(compiled_prompt)
         logger.info("L5 answer generated via Groq fallback", extra={"confidence": result.confidence})
@@ -260,7 +250,7 @@ if __name__ == "__main__":
     fake_intent = IntentResult(category=IntentCategory.TECHNIQUE, sport="BOXING", confidence=0.99, extracted_entities=[])
     fake_rag    = RagResult(retrieved_chunks=["To throw a proper jab, keep your chin tucked, step in with your lead foot, and turn your knuckles over at the end of the punch. Rotate your shoulder to protect your chin."], max_score=0.88, used_fallback=False)
 
-    print("\n--- Testing Level 5 LLM Generation (Gemini → Groq fallback) ---")
+    print("\n--- Testing Level 5 LLM Generation (Gemini -> Groq fallback) ---")
     res = generate_answer(
         query="How do I throw a jab safely?",
         intent=fake_intent,
